@@ -1,0 +1,606 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import tempfile
+import json
+import yaml
+
+from PyQt5 import QtGui, QtWidgets, QtCore
+from PyQt5.QtCore import Qt, QItemSelectionModel, QIdentityProxyModel
+from PyQt5.QtGui import QIcon
+
+import icons
+
+def dictizeString(string, dictionary):
+    while string.startswith(os.path.sep):
+        string = string[1:]
+    parts = string.split(os.path.sep, 1)
+    if len(parts) > 1:
+        if (os.path.sep not in parts[1]):
+            branch = dictionary.setdefault(parts[0], [])
+        else:
+            branch = dictionary.setdefault(parts[0], {})
+        dictizeString(parts[1], branch)
+        if (os.path.sep not in parts[1]):
+            dictionary[parts[0]].append(parts[1])
+
+
+def which(executable):
+    path = os.getenv('PATH')
+    for segment in path.split(':'):
+        candidate = os.path.join(segment, executable)
+        if (os.path.exists(candidate)):
+            return candidate
+    return None
+
+
+# from https://python-3-patterns-idioms-test.readthedocs.io/en/latest/Singleton.html
+class Results(object):
+    class __OnlyOne:
+        def __init__(self):
+            self.data = []
+    instance = None
+    def __new__(cls): # __new__ always a classmethod
+        if not Results.instance:
+            Results.instance = Results.__OnlyOne()
+        return Results.instance
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+    def __setattr__(self, name):
+        return setattr(self.instance, name)
+
+
+class ClangChecks():
+    def __init__(self):
+        self.checks = {}
+        cmd = 'clang-tidy --list-checks --checks="*"'
+        checks = os.popen(cmd).read().strip()
+        for check in checks.split('\n'):
+            check = check.strip()
+            if (check.find('-') == -1):
+                continue
+            category = check.split('-')[0]
+            self.checks.setdefault(category, []).append('-'.join(check.split('-')[1:]))
+
+
+class CompileCommands():
+    def __init__(self):
+        if (len(sys.argv) > 1):
+            buildpath = sys.argv[1]
+        else:
+            buildpath = os.getcwd()
+        paths = json.load(open(os.path.join(buildpath, 'compile_commands.json')))
+        paths = [x['file'] for x in paths]
+        self.path = os.path.dirname(os.path.commonprefix(paths))
+        trim = len(self.path)
+        paths = [x[trim:] for x in paths]
+        self.sources = {}
+        for sourcefile in paths:
+            dictizeString(sourcefile, self.sources)
+
+
+# from https://stackoverflow.com/a/49160046
+class StandardItem(QtGui.QStandardItem):
+    def data(self, role=Qt.UserRole + 1):
+        if (role == Qt.CheckStateRole and self.hasChildren() and
+                self.flags() & Qt.ItemIsAutoTristate):
+            return self._childrenCheckState()
+        return super().data(role)
+
+    def setData(self, value, role=Qt.UserRole + 1):
+        if role == Qt.CheckStateRole:
+            if (self.flags() & Qt.ItemIsAutoTristate and
+                    value != Qt.PartiallyChecked):
+                for row in range(self.rowCount()):
+                    for column in range(self.columnCount()):
+                        child = self.child(row, column)
+                        if child.data(role) is not None:
+                            flags = self.flags()
+                            self.setFlags(flags & ~Qt.ItemIsAutoTristate)
+                            child.setData(value, role)
+                            self.setFlags(flags)
+            model = self.model()
+            if model is not None:
+                parent = self
+                while True:
+                    parent = parent.parent()
+                    if (parent is not None and
+                            parent.flags() & Qt.ItemIsAutoTristate):
+                        model.dataChanged.emit(
+                            parent.index(), parent.index(),
+                            [Qt.CheckStateRole])
+                    else:
+                        break
+        super().setData(value, role)
+
+    def _childrenCheckState(self):
+        checked = unchecked = False
+        for row in range(self.rowCount()):
+            for column in range(self.columnCount()):
+                child = self.child(row, column)
+                value = child.data(Qt.CheckStateRole)
+                if value is None:
+                    return
+                elif value == Qt.Unchecked:
+                    unchecked = True
+                elif value == Qt.Checked:
+                    checked = True
+                else:
+                    return Qt.PartiallyChecked
+                if unchecked and checked:
+                    return Qt.PartiallyChecked
+        if unchecked:
+            return Qt.Unchecked
+        elif checked:
+            return Qt.Checked
+
+
+class SelectionModel(QtGui.QStandardItemModel):
+    # def currentRowChanged(self, current, previous):
+    #     print ('currentchanged')
+    #     return super(SelectionModel, self).currentRowChanged(current, previous)
+
+    def flags(self, index):
+        flags = super(SelectionModel, self).flags(index)
+        newflags = [flags, flags & Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
+        print (self.data(index), self.itemFromIndex(index).hasChildren(), int(flags), int(newflags))
+        # print ('FOO', index)
+        # return QtCore.ItemFlags(46)
+        # PyQt5.QtCore.ItemFlags
+        return flags
+        # return flags & [~Qt.ItemIsSelectable, Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
+        # return flags
+
+
+class TreeView(QtWidgets.QTreeView):
+    def __init__(self, parent=None):
+        super(TreeView, self).__init__(parent)
+        model = SelectionModel()
+        self.setModel(model)
+
+    def expandChildren(self, index):
+        if (not index.isValid()):
+            return
+        childcount = index.model().rowCount(index)
+        for n in range(childcount):
+            child = index.child(n, 0)
+            self.expandChildren(child)
+        if (not self.isExpanded(index)):
+            self.expand(index)
+
+    def collapseChildren(self, index):
+        if (not index.isValid()):
+            return
+        childcount = index.model().rowCount(index)
+        for n in range(childcount):
+            child = index.child(n, 0)
+            self.collapseChildren(child)
+        if (self.isExpanded(index)):
+            self.collapse(index)
+
+    def mousePressEvent(self, event):
+        index = self.indexAt(event.pos())
+        if (index.isValid()):
+            vrect = self.visualRect(index)
+            indentation = vrect.x() - self.visualRect(self.rootIndex()).x()
+            if (event.pos().x() < indentation):
+                if (QtWidgets.QApplication.keyboardModifiers() == Qt.ShiftModifier):
+                    [self.expandChildren, self.collapseChildren][self.isExpanded(index)](index)
+                    return
+        super(TreeView, self).mousePressEvent(event)
+
+class ExpandCollapseToolBar(QtWidgets.QToolBar):
+    def __init__(self, view):
+        super(ExpandCollapseToolBar, self).__init__()
+
+        self.setStyleSheet("""
+QToolButton {
+    border: 0px solid #00000000; 
+}
+QToolBar {
+    spacing: 0px;
+}""" )
+
+        # self.setIconSize(QSize(24, 24))
+
+        # right justifying spacer
+        spacer = QtWidgets.QWidget()
+        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        super().addWidget(spacer)
+
+        # expand
+        expandicon = QIcon(':/img/expand')
+        expandaction = QtWidgets.QAction(expandicon, 'Expand all', self)
+        expandaction.triggered.connect(view.expandAll)
+        super().addAction(expandaction)
+
+        # collapse
+        collapseicon = QIcon(':/img/collapse')
+        collapseaction = QtWidgets.QAction(collapseicon, 'Collapse all', self)
+        collapseaction.triggered.connect(view.collapseAll)
+        super().addAction(collapseaction)
+
+
+class TreeViewTab(QtWidgets.QWidget):
+    def __init__(self, parent):
+        super(TreeViewTab, self).__init__(parent)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        # layout.setContentsMargins(0, 10, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.view = TreeView(self)
+        self.view.setHeaderHidden(True)
+        self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
+
+        self.view.collapseAll()
+
+        self.root = None
+
+        self.populateView()
+
+        # toolbar = ExpandCollapseToolBar(self.view)
+
+        # layout.addWidget(toolbar)
+        layout.addWidget(self.view)
+
+    def selectAll(self):
+        for row in range(self.root.rowCount()):
+            child = self.root.child(row, 0)
+            child.setCheckState(Qt.Checked)
+
+    def selectNone(self):
+        for row in range(self.root.rowCount()):
+            child = self.root.child(row, 0)
+            child.setCheckState(Qt.Unchecked)
+
+    def expandAll(self):
+        self.view.expandAll()
+
+    def collapseAll(self):
+        self.view.collapseAll()
+
+    def _checked(self, sep):
+
+        # from https://stackoverflow.com/a/41951887
+        def iterItems(root):
+            def recurse(parent):
+                for row in range(parent.rowCount()):
+                    for column in range(parent.columnCount()):
+                        child = parent.child(row, column)
+                        yield child
+                        if child.hasChildren():
+                            yield from recurse(child)
+            if root is not None:
+                yield from recurse(root)
+
+        checked = []
+        model = self.view.model()
+        for item in iterItems(self.root):
+            if (item.checkState() and not item.hasChildren()):
+                checked.append(sep.join([model.data(item.index(), Qt.UserRole), model.data(item.index())]))
+
+        return checked
+
+
+class ChecksTab(TreeViewTab):
+    def populateView(self, data=None, root=None, rootname=''):
+        if (root is None):
+            self.view.model().clear()
+            self.root = root = self.view.model().invisibleRootItem()
+            data = ClangChecks().checks
+
+        for itemname in data:
+            item = StandardItem(itemname)
+            item.setCheckable(True)
+            item.setCheckState(Qt.Unchecked)
+            item.setFlags(item.flags() | Qt.ItemIsAutoTristate)
+            item.setData(rootname, Qt.UserRole)
+            root.appendRow(item)
+            parent = root.child(root.rowCount() - 1)
+            if (isinstance(data, dict)):
+                self.populateView(data[itemname], parent, os.path.join(rootname, itemname))
+
+    def checked(self):
+        return super()._checked('-')
+
+
+class SourceTab(TreeViewTab):
+    def populateView(self, sources=None, root=None, rootname=''):
+        if (root is None):
+            self.view.model().clear()
+            self.root = root = self.view.model().invisibleRootItem()
+            data = CompileCommands()
+            sources = data.sources
+            rootname = data.path
+
+        for itemname in sources:
+            item = StandardItem(itemname)
+            item.setCheckable(True)
+            # item.setCheckState(Qt.Checked)
+
+            # TODO: remove
+            if (rootname == '/home/jasonr/workspace/look/src/main' and itemname == 'main.cpp'):
+                item.setCheckState(Qt.Checked)
+            if (rootname == '/home/jasonr/workspace/look/src/ui' and itemname == 'mainWindow.cpp'):
+                item.setCheckState(Qt.Checked)
+
+            item.setFlags(item.flags() | Qt.ItemIsAutoTristate)
+            item.setData(rootname, Qt.UserRole)
+            root.appendRow(item)
+            parent = root.child(root.rowCount() - 1)
+            if (isinstance(sources, dict)):
+                self.populateView(sources[itemname], parent, os.path.join(rootname, itemname))
+
+    def checked(self):
+        return super()._checked(os.path.sep)
+
+
+class ResultsTab(QtWidgets.QWidget):
+    def __init__(self, parent):
+        super(ResultsTab, self).__init__(parent)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # sorting method combo box
+        sortlayout = QtWidgets.QHBoxLayout()
+        sortlayout.setContentsMargins(10, 5, 0, 0)
+        sortlayout.setAlignment(Qt.AlignLeft)
+        label = QtWidgets.QLabel('Sort by: ')
+        self.sortcombo = QtWidgets.QComboBox(self)
+        self.sortcombo.currentIndexChanged.connect(self.refresh)
+        self.sortcombo.addItem(' Filename ')
+        self.sortcombo.addItem(' Checkname')
+        self.sortcombo.setCurrentIndex(1)
+        sortlayout.addWidget(label)
+        sortlayout.addWidget(self.sortcombo)
+
+        # results view
+        self.view = self.ResultsView(self)
+
+        layout.addLayout(sortlayout)
+        layout.addWidget(self.view)
+
+    def refresh(self):
+        # view might not exist yet as the combo box is created first
+        if (hasattr(self, 'view')):
+            self.view.populateView()
+
+    def expandAll(self):
+        self.view.expandAll()
+
+    def collapseAll(self):
+        self.view.collapseAll()
+
+    class ResultsView(TreeViewTab):
+        def populateView(self, data=None, root=None, rootname=''):
+            if (root is None):
+                self.view.model().clear()
+                self.root = root = self.view.model().invisibleRootItem()
+
+                sorttype = self.parent().sortcombo.currentIndex()
+                data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
+
+            for item in data:
+                root.appendRow(StandardItem(item))
+                parent = root.child(root.rowCount() - 1)
+                if (isinstance(data, dict)):
+                    self.populateView(data[item], parent, os.path.join(rootname, item))
+
+        def sortedByFilename(self):
+            data = Results().data
+
+            # get common base path
+            paths = [x[0] for x in data]
+            basepath = os.path.dirname(os.path.commonprefix(paths))
+
+            # trim common base path off each path
+            trim = len(basepath)
+            paths = [x[trim:] for x in paths]
+            paths = [x[1:] for x in paths if x[0] == os.sep]
+
+            # make unique
+            # paths = list(set(paths))
+
+            results = {}
+            for path in paths:
+                dictizeString(path, results)
+            return results
+
+        def sortedByCheckname(self):
+            data = Results().data
+
+            # get common base path
+            paths = [x[0] for x in data]
+            basepath = os.path.dirname(os.path.commonprefix(paths))
+
+            results = {}
+            for filename, check in data:
+                category = check.split('-')[0]
+                shortcheck = '-'.join(check.split('-')[1:])
+
+                # trim common base path off filename
+                trim = len(basepath) + 1
+                filename = filename[trim:]
+                results.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
+
+            # make filename entries unique
+            # for category in results:
+            #     for check in results[category]:
+            #         results[category][check] = list(set(results[category][check]))
+
+            return results
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self, clangtidy):
+        super(MainWindow, self).__init__()
+        self.setWindowTitle('clang-tidy gui')
+        self.clangtidy = clangtidy
+        self.currentTab = 0
+
+        mainwidget = QtWidgets.QWidget(self)
+        mainlayout = QtWidgets.QVBoxLayout(mainwidget) 
+        mainlayout.setContentsMargins(0, 0, 0, 0)
+
+        # tab widget
+        tabwidget = QtWidgets.QTabWidget(self)
+        tabwidget.setTabsClosable(False)
+        tabwidget.currentChanged.connect(self.switchTab)
+
+        # tabs
+        self.checksTab = ChecksTab(self)
+        tabwidget.addTab(self.checksTab, 'Checks')
+
+        self.sourceTab = SourceTab(self)
+        tabwidget.addTab(self.sourceTab, 'Source')
+
+        self.resultsTab = ResultsTab(self)
+        tabwidget.addTab(self.resultsTab, 'Results')
+
+        # bottom bar
+        runbutton = QtWidgets.QPushButton('Run Clang Tidy')
+        runbuttonlayout = QtWidgets.QHBoxLayout()
+        runbuttonlayout.setContentsMargins(5, 0, 5, 5)
+        runbuttonlayout.setAlignment(Qt.AlignRight)
+
+        statusbar = QtWidgets.QLabel(self)
+
+        runbuttonlayout.addWidget(statusbar, 1)
+        runbuttonlayout.addWidget(runbutton)
+
+        mainlayout.addWidget(tabwidget)
+        mainlayout.addLayout(runbuttonlayout)
+
+        # menu
+        menu = self.menuBar()
+        filemenu = menu.addMenu('&File')
+        editmenu = menu.addMenu('&Edit')
+        runmenu = menu.addMenu('&Run')
+
+        # menu items
+        exitaction = QtWidgets.QAction('&Exit', self)
+        exitaction.setShortcut('Escape')
+        exitaction.triggered.connect(self.exitApplication)
+
+        selectallaction = QtWidgets.QAction('Check &All', self)
+        selectallaction.setShortcut('Ctrl+A')
+        selectallaction.triggered.connect(self.checkAll)
+        selectnoneaction = QtWidgets.QAction('Uncheck All', self)
+        selectnoneaction.setShortcut('Ctrl+N')
+        selectnoneaction.triggered.connect(self.uncheckAll)
+
+        expandallaction = QtWidgets.QAction('&Expand All', self)
+        expandallaction.setShortcut('Ctrl+E')
+        expandallaction.triggered.connect(self.expandAll)
+
+        collapseallaction = QtWidgets.QAction('&Collapse All', self)
+        collapseallaction.setShortcut('Ctrl+C')
+        collapseallaction.triggered.connect(self.collapseAll)
+
+        runaction = QtWidgets.QAction('&Clang Tidy', self)
+        runaction.setShortcut('Ctrl+R')
+        runaction.triggered.connect(self.runClangTidy)
+
+        filemenu.addAction(exitaction)
+        runmenu.addAction(runaction)
+        editmenu.addAction(selectallaction)
+        editmenu.addAction(selectnoneaction)
+        editmenu.addSeparator()
+        editmenu.addAction(expandallaction)
+        editmenu.addAction(collapseallaction)
+
+        self.setCentralWidget(mainwidget)
+
+        # TODO: remove
+        tabwidget.setCurrentWidget(self.resultsTab)
+        self.runClangTidy()
+
+    def checkAll(self):
+        if (self.currentTab == 2):
+            return
+        [self.checksTab, self.sourceTab][self.currentTab].selectAll()
+
+    def uncheckAll(self):
+        if (self.currentTab == 2):
+            return
+        [self.checksTab, self.sourceTab][self.currentTab].selectNone()
+
+    def expandAll(self):
+        [self.checksTab, self.sourceTab, self.resultsTab][self.currentTab].expandAll()
+
+    def collapseAll(self):
+        [self.checksTab, self.sourceTab, self.resultsTab][self.currentTab].collapseAll()
+
+    def switchTab(self, index):
+        self.currentTab = index
+
+    def runClangTidy(self):
+        checks = ','.join(['-*'] + self.checksTab.checked())
+        tmpdir = tempfile.mkdtemp()
+
+        if (len(sys.argv) > 1):
+            buildpath = sys.argv[1]
+        else:
+            buildpath = os.getcwd()
+
+        for sourcefile in self.sourceTab.checked():
+            sourcename = os.path.splitext(os.path.split(sourcefile)[1])[0]
+            fixesfile = os.path.join(tmpdir, sourcename) + ".yaml"
+            fixesfile = '/tmp/tmp95yuupbl/%s.yaml' % (sourcename)
+            cmd = '{} -quiet -checks="{}" -export-fixes={} -p={} {}'.format(self.clangtidy, checks, fixesfile, buildpath, sourcefile)
+            print(cmd)
+            # os.system(cmd)  # TODO: use subprocess
+
+            results = Results()
+
+            if (os.path.exists(fixesfile) and os.path.getsize(fixesfile) > 0):
+                fixesdata = open(fixesfile).read().strip()
+
+                fixes = yaml.load(fixesdata)
+                for fix in fixes['Diagnostics']:
+                    if ('Replacements' not in fix['DiagnosticMessage']):
+                        continue
+
+                    message = fix['DiagnosticMessage']
+
+                    # calculate line number from offset
+                    offset = message['FileOffset']
+                    filepath = message['FilePath']
+                    filedata = open(filepath).read().strip()
+                    count = 0
+                    num = 0
+                    for num, line in enumerate(filedata.split('\n')):
+                        count += len(line) + 1
+                        if (count > offset):
+                            break
+
+                    results.data.append(('%s:%d' % (filepath, num+1), fix['DiagnosticName']))
+
+                self.resultsTab.refresh()
+
+    def exitApplication(self, checked):
+        sys.exit(0)
+
+
+if __name__ == '__main__':
+    clangtidy = which('clang-tidy')
+    if (not clangtidy):
+        print ('error: clang-tidy not found.')
+        sys.exit(1)
+
+    QtWidgets.QApplication.setDesktopSettingsAware(True)
+    app = QtWidgets.QApplication(sys.argv)
+    app.setStyle('GTK+')
+
+    try:
+        window = MainWindow(clangtidy)
+    except FileNotFoundError as err:
+        print(err)
+        sys.exit(0)
+
+    window.setGeometry(500, 300, 800, 600)
+    window.show()
+    sys.exit(app.exec_())

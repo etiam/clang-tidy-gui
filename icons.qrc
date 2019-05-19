@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="img/expand">images/icons8-expand-24.png</file>
+        <file alias="img/collapse">images/icons8-collapse-24.png</file>
+    </qresource>
+</RCC>
