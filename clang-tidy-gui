@@ -6,11 +6,8 @@ import tempfile
 import json
 import yaml
 
-from PyQt5 import QtGui, QtWidgets, QtCore
-from PyQt5.QtCore import Qt, QItemSelectionModel, QIdentityProxyModel
-from PyQt5.QtGui import QIcon
-
-import icons
+from PyQt5 import QtGui, QtWidgets
+from PyQt5.QtCore import Qt
 
 def dictizeString(string, dictionary):
     while string.startswith(os.path.sep):
@@ -136,27 +133,10 @@ class StandardItem(QtGui.QStandardItem):
             return Qt.Checked
 
 
-class SelectionModel(QtGui.QStandardItemModel):
-    # def currentRowChanged(self, current, previous):
-    #     print ('currentchanged')
-    #     return super(SelectionModel, self).currentRowChanged(current, previous)
-
-    def flags(self, index):
-        flags = super(SelectionModel, self).flags(index)
-        newflags = [flags, flags & Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
-        print (self.data(index), self.itemFromIndex(index).hasChildren(), int(flags), int(newflags))
-        # print ('FOO', index)
-        # return QtCore.ItemFlags(46)
-        # PyQt5.QtCore.ItemFlags
-        return flags
-        # return flags & [~Qt.ItemIsSelectable, Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
-        # return flags
-
-
 class TreeView(QtWidgets.QTreeView):
     def __init__(self, parent=None):
         super(TreeView, self).__init__(parent)
-        model = SelectionModel()
+        model = QtGui.QStandardItemModel()
         self.setModel(model)
 
     def expandChildren(self, index):
@@ -190,44 +170,12 @@ class TreeView(QtWidgets.QTreeView):
                     return
         super(TreeView, self).mousePressEvent(event)
 
-class ExpandCollapseToolBar(QtWidgets.QToolBar):
-    def __init__(self, view):
-        super(ExpandCollapseToolBar, self).__init__()
-
-        self.setStyleSheet("""
-QToolButton {
-    border: 0px solid #00000000; 
-}
-QToolBar {
-    spacing: 0px;
-}""" )
-
-        # self.setIconSize(QSize(24, 24))
-
-        # right justifying spacer
-        spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        super().addWidget(spacer)
-
-        # expand
-        expandicon = QIcon(':/img/expand')
-        expandaction = QtWidgets.QAction(expandicon, 'Expand all', self)
-        expandaction.triggered.connect(view.expandAll)
-        super().addAction(expandaction)
-
-        # collapse
-        collapseicon = QIcon(':/img/collapse')
-        collapseaction = QtWidgets.QAction(collapseicon, 'Collapse all', self)
-        collapseaction.triggered.connect(view.collapseAll)
-        super().addAction(collapseaction)
-
 
 class TreeViewTab(QtWidgets.QWidget):
     def __init__(self, parent):
         super(TreeViewTab, self).__init__(parent)
 
         layout = QtWidgets.QVBoxLayout(self)
-        # layout.setContentsMargins(0, 10, 0, 0)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.view = TreeView(self)
@@ -239,8 +187,6 @@ class TreeViewTab(QtWidgets.QWidget):
         self.root = None
 
         self.populateView()
-
-        # toolbar = ExpandCollapseToolBar(self.view)
 
         # layout.addWidget(toolbar)
         layout.addWidget(self.view)
@@ -318,6 +264,8 @@ class SourceTab(TreeViewTab):
         for itemname in sources:
             item = StandardItem(itemname)
             item.setCheckable(True)
+
+            # TODO : re-enable
             # item.setCheckState(Qt.Checked)
 
             # TODO: remove
@@ -401,9 +349,6 @@ class ResultsTab(QtWidgets.QWidget):
             paths = [x[trim:] for x in paths]
             paths = [x[1:] for x in paths if x[0] == os.sep]
 
-            # make unique
-            # paths = list(set(paths))
-
             results = {}
             for path in paths:
                 dictizeString(path, results)
@@ -425,11 +370,6 @@ class ResultsTab(QtWidgets.QWidget):
                 trim = len(basepath) + 1
                 filename = filename[trim:]
                 results.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
-
-            # make filename entries unique
-            # for category in results:
-            #     for check in results[category]:
-            #         results[category][check] = list(set(results[category][check]))
 
             return results
 
