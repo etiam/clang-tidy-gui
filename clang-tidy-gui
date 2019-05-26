@@ -6,9 +6,8 @@ import tempfile
 import json
 import yaml
 
-from PyQt5 import QtGui, QtWidgets, QtCore
-from PyQt5.QtCore import Qt, QItemSelectionModel, QIdentityProxyModel
-from PyQt5.QtGui import QIcon
+from PyQt5 import QtGui, QtWidgets
+from PyQt5.QtCore import Qt
 
 def dictizeString(string, dictionary):
     while string.startswith(os.path.sep):
@@ -186,7 +185,6 @@ class TreeViewTab(QtWidgets.QWidget):
         super(TreeViewTab, self).__init__(parent)
 
         layout = QtWidgets.QVBoxLayout(self)
-        # layout.setContentsMargins(0, 10, 0, 0)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.view = TreeView(self)
@@ -281,6 +279,8 @@ class SourceTab(TreeViewTab):
         for itemname in sources:
             item = StandardItem(itemname)
             item.setCheckable(True)
+
+            # TODO : re-enable
             # item.setCheckState(Qt.Checked)
 
             # TODO: remove
@@ -364,9 +364,6 @@ class ResultsTab(QtWidgets.QWidget):
             paths = [x[trim:] for x in paths]
             paths = [x[1:] for x in paths if x[0] == os.sep]
 
-            # make unique
-            # paths = list(set(paths))
-
             results = {}
             for path in paths:
                 dictizeString(path, results)
@@ -388,11 +385,6 @@ class ResultsTab(QtWidgets.QWidget):
                 trim = len(basepath) + 1
                 filename = filename[trim:]
                 results.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
-
-            # make filename entries unique
-            # for category in results:
-            #     for check in results[category]:
-            #         results[category][check] = list(set(results[category][check]))
 
             return results
 
