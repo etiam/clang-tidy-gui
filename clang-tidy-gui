@@ -10,8 +10,6 @@ from PyQt5 import QtGui, QtWidgets, QtCore
 from PyQt5.QtCore import Qt, QItemSelectionModel, QIdentityProxyModel
 from PyQt5.QtGui import QIcon
 
-import icons
-
 def dictizeString(string, dictionary):
     while string.startswith(os.path.sep):
         string = string[1:]
@@ -47,21 +45,30 @@ class Results(object):
         return Results.instance
     def __getattr__(self, name):
         return getattr(self.instance, name)
-    def __setattr__(self, name):
-        return setattr(self.instance, name)
+    # def __setattr__(self, name):
+    #     return setattr(self.instance, name)
 
 
-class ClangChecks():
-    def __init__(self):
-        self.checks = {}
-        cmd = 'clang-tidy --list-checks --checks="*"'
-        checks = os.popen(cmd).read().strip()
-        for check in checks.split('\n'):
-            check = check.strip()
-            if (check.find('-') == -1):
-                continue
-            category = check.split('-')[0]
-            self.checks.setdefault(category, []).append('-'.join(check.split('-')[1:]))
+class ClangChecks(object):
+    class __OnlyOne:
+        def __init__(self):
+            self.checks = {}
+            print ('getting clang checks')
+            cmd = 'clang-tidy --list-checks --checks="*"'
+            checks = os.popen(cmd).read().strip()
+            for check in checks.split('\n'):
+                check = check.strip()
+                if (check.find('-') == -1):
+                    continue
+                category = check.split('-')[0]
+                self.checks.setdefault(category, []).append('-'.join(check.split('-')[1:]))
+    instance = None
+    def __new__(cls): # __new__ always a classmethod
+        if not ClangChecks.instance:
+            ClangChecks.instance = ClangChecks.__OnlyOne()
+        return ClangChecks.instance
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
 
 
 class CompileCommands():
@@ -136,27 +143,10 @@ class StandardItem(QtGui.QStandardItem):
             return Qt.Checked
 
 
-class SelectionModel(QtGui.QStandardItemModel):
-    # def currentRowChanged(self, current, previous):
-    #     print ('currentchanged')
-    #     return super(SelectionModel, self).currentRowChanged(current, previous)
-
-    def flags(self, index):
-        flags = super(SelectionModel, self).flags(index)
-        newflags = [flags, flags & Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
-        print (self.data(index), self.itemFromIndex(index).hasChildren(), int(flags), int(newflags))
-        # print ('FOO', index)
-        # return QtCore.ItemFlags(46)
-        # PyQt5.QtCore.ItemFlags
-        return flags
-        # return flags & [~Qt.ItemIsSelectable, Qt.ItemIsSelectable][self.itemFromIndex(index).hasChildren()]
-        # return flags
-
-
 class TreeView(QtWidgets.QTreeView):
     def __init__(self, parent=None):
         super(TreeView, self).__init__(parent)
-        model = SelectionModel()
+        model = QtGui.QStandardItemModel()
         self.setModel(model)
 
     def expandChildren(self, index):
@@ -190,37 +180,6 @@ class TreeView(QtWidgets.QTreeView):
                     return
         super(TreeView, self).mousePressEvent(event)
 
-class ExpandCollapseToolBar(QtWidgets.QToolBar):
-    def __init__(self, view):
-        super(ExpandCollapseToolBar, self).__init__()
-
-        self.setStyleSheet("""
-QToolButton {
-    border: 0px solid #00000000; 
-}
-QToolBar {
-    spacing: 0px;
-}""" )
-
-        # self.setIconSize(QSize(24, 24))
-
-        # right justifying spacer
-        spacer = QtWidgets.QWidget()
-        spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        super().addWidget(spacer)
-
-        # expand
-        expandicon = QIcon(':/img/expand')
-        expandaction = QtWidgets.QAction(expandicon, 'Expand all', self)
-        expandaction.triggered.connect(view.expandAll)
-        super().addAction(expandaction)
-
-        # collapse
-        collapseicon = QIcon(':/img/collapse')
-        collapseaction = QtWidgets.QAction(collapseicon, 'Collapse all', self)
-        collapseaction.triggered.connect(view.collapseAll)
-        super().addAction(collapseaction)
-
 
 class TreeViewTab(QtWidgets.QWidget):
     def __init__(self, parent):
@@ -240,9 +199,6 @@ class TreeViewTab(QtWidgets.QWidget):
 
         self.populateView()
 
-        # toolbar = ExpandCollapseToolBar(self.view)
-
-        # layout.addWidget(toolbar)
         layout.addWidget(self.view)
 
     def selectAll(self):
@@ -295,6 +251,13 @@ class ChecksTab(TreeViewTab):
             item = StandardItem(itemname)
             item.setCheckable(True)
             item.setCheckState(Qt.Unchecked)
+
+            # TODO: remove
+            # if ('-'.join([rootname, itemname]).find('cppcoreguidelines') != -1):
+            #     item.setCheckState(Qt.Checked)
+            if ('-'.join([rootname, itemname]).find('modernize') != -1):
+                item.setCheckState(Qt.Checked)
+
             item.setFlags(item.flags() | Qt.ItemIsAutoTristate)
             item.setData(rootname, Qt.UserRole)
             root.appendRow(item)
@@ -321,10 +284,10 @@ class SourceTab(TreeViewTab):
             # item.setCheckState(Qt.Checked)
 
             # TODO: remove
-            if (rootname == '/home/jasonr/workspace/look/src/main' and itemname == 'main.cpp'):
+            if (os.path.join(rootname, itemname).find('src/main/main.cpp') != -1):
                 item.setCheckState(Qt.Checked)
-            if (rootname == '/home/jasonr/workspace/look/src/ui' and itemname == 'mainWindow.cpp'):
-                item.setCheckState(Qt.Checked)
+            # if (os.path.join(rootname, itemname).find('src/ui/mainWindow.cpp') != -1):
+            #     item.setCheckState(Qt.Checked)
 
             item.setFlags(item.flags() | Qt.ItemIsAutoTristate)
             item.setData(rootname, Qt.UserRole)
@@ -515,7 +478,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(mainwidget)
 
         # TODO: remove
-        tabwidget.setCurrentWidget(self.resultsTab)
+        # tabwidget.setCurrentWidget(self.resultsTab)
+        tabwidget.setCurrentWidget(self.checksTab)
         self.runClangTidy()
 
     def checkAll(self):
@@ -537,8 +501,57 @@ class MainWindow(QtWidgets.QMainWindow):
     def switchTab(self, index):
         self.currentTab = index
 
+    def getOptimizedEnabledChecks(self):
+        """Return the smallest possible list of enabled checks.
+
+        For example: ['-modernize*', 'modernize-avoid-bind'] is
+        shorter than the entire list of 'modernize-...' checks
+        minus 'modernize-avoid-bind'.
+        """
+        optimizedchecks = []
+
+        # create dictionary of enabled checks keyed off category name
+        categories = {}
+        checked = self.checksTab.checked()
+        for check in checked:
+            if (check.find('-') == -1):
+                continue
+            category = check.split('-')[0]
+            categories.setdefault(category, []).append('-'.join(check.split('-')[1:]))
+
+        allchecks = ClangChecks().checks
+
+        # for each category of the list of enabled checks
+        for category, enabledchecks in categories.items():
+
+            # if all the checks are enabled use 'category-*'
+            if (len(enabledchecks) == len(allchecks[category])):
+               optimizedchecks.append('%s*' % (category))
+
+            # if a minority of checks are enabled, use '-category*, enabled'
+            elif (len(enabledchecks) < len(allchecks[category]) / 2):
+               optimizedchecks.append('-%s*' % (category))
+               optimizedchecks.extend(['%s-%s' % (category, x) for x in enabledchecks])
+
+            # if a majority of checks are enabled, use 'category*, -enabled'
+            else:
+               optimizedchecks.append('%s*' % (category))
+               optimizedchecks.extend(['-%s-%s' % (category, x) for x in enabledchecks])      
+
+        return optimizedchecks
+
+    def getLineNumberFromOffset(self, offset, data):
+        """Return the linenumber into data based on offset"""
+        linenum = 0
+        count = 0
+        for linenum, line in enumerate(data.split('\n')):
+            count += len(line) + 1
+            if (count > offset):
+                break
+        return linenum + 1
+
     def runClangTidy(self):
-        checks = ','.join(['-*'] + self.checksTab.checked())
+        checks = ','.join(['-*'] + self.getOptimizedEnabledChecks())
         tmpdir = tempfile.mkdtemp()
 
         if (len(sys.argv) > 1):
@@ -546,38 +559,36 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             buildpath = os.getcwd()
 
+        # run clang-tidy on each source file
+        # TODO: make this "multi-threaded"
         for sourcefile in self.sourceTab.checked():
             sourcename = os.path.splitext(os.path.split(sourcefile)[1])[0]
             fixesfile = os.path.join(tmpdir, sourcename) + ".yaml"
-            fixesfile = '/tmp/tmp95yuupbl/%s.yaml' % (sourcename)
+            fixesfile = './tmp95yuupbl/%s.yaml' % (sourcename)
             cmd = '{} -quiet -checks="{}" -export-fixes={} -p={} {}'.format(self.clangtidy, checks, fixesfile, buildpath, sourcefile)
             print(cmd)
             # os.system(cmd)  # TODO: use subprocess
 
             results = Results()
 
+            # parse the resulting yaml file
             if (os.path.exists(fixesfile) and os.path.getsize(fixesfile) > 0):
                 fixesdata = open(fixesfile).read().strip()
 
-                fixes = yaml.load(fixesdata)
+                fixes = yaml.load(fixesdata, Loader=yaml.FullLoader)
+                # fixes = {'Diagnostics': {}}
                 for fix in fixes['Diagnostics']:
                     if ('Replacements' not in fix['DiagnosticMessage']):
                         continue
 
+                    name = fix['DiagnosticName']
                     message = fix['DiagnosticMessage']
-
-                    # calculate line number from offset
                     offset = message['FileOffset']
                     filepath = message['FilePath']
-                    filedata = open(filepath).read().strip()
-                    count = 0
-                    num = 0
-                    for num, line in enumerate(filedata.split('\n')):
-                        count += len(line) + 1
-                        if (count > offset):
-                            break
 
-                    results.data.append(('%s:%d' % (filepath, num+1), fix['DiagnosticName']))
+                    data = open(filepath).read().strip()
+                    linenum = self.getLineNumberFromOffset(offset, data)
+                    results.data.append(('%s:%d' % (filepath, linenum), name))
 
                 self.resultsTab.refresh()
 
