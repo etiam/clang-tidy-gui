@@ -136,8 +136,10 @@ class StandardItem(QtGui.QStandardItem):
 class TreeView(QtWidgets.QTreeView):
     def __init__(self, parent=None):
         super(TreeView, self).__init__(parent)
-        model = QtGui.QStandardItemModel()
-        self.setModel(model)
+
+        self.model = QtGui.QStandardItemModel(parent)
+        self.model.setHeaderData(0, Qt.Horizontal, "From")
+        self.setModel(self.model)
 
     def expandChildren(self, index):
         if (not index.isValid()):
@@ -179,8 +181,8 @@ class TreeViewTab(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.view = TreeView(self)
-        self.view.setHeaderHidden(True)
-        self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
+        # self.view.setHeaderHidden(True)
+        # self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
 
         self.view.collapseAll()
 
@@ -188,7 +190,6 @@ class TreeViewTab(QtWidgets.QWidget):
 
         self.populateView()
 
-        # layout.addWidget(toolbar)
         layout.addWidget(self.view)
 
     def selectAll(self):
@@ -222,7 +223,7 @@ class TreeViewTab(QtWidgets.QWidget):
                 yield from recurse(root)
 
         checked = []
-        model = self.view.model()
+        model = self.view.model
         for item in iterItems(self.root):
             if (item.checkState() and not item.hasChildren()):
                 checked.append(sep.join([model.data(item.index(), Qt.UserRole), model.data(item.index())]))
@@ -233,8 +234,8 @@ class TreeViewTab(QtWidgets.QWidget):
 class ChecksTab(TreeViewTab):
     def populateView(self, data=None, root=None, rootname=''):
         if (root is None):
-            self.view.model().clear()
-            self.root = root = self.view.model().invisibleRootItem()
+            self.view.model.clear()
+            self.root = root = self.view.model.invisibleRootItem()
             data = ClangChecks().checks
 
         for itemname in data:
@@ -245,7 +246,7 @@ class ChecksTab(TreeViewTab):
             item.setData(rootname, Qt.UserRole)
             root.appendRow(item)
             parent = root.child(root.rowCount() - 1)
-            if (isinstance(data, dict)):
+            if (parent and isinstance(data, dict)):
                 self.populateView(data[itemname], parent, os.path.join(rootname, itemname))
 
     def checked(self):
@@ -255,8 +256,8 @@ class ChecksTab(TreeViewTab):
 class SourceTab(TreeViewTab):
     def populateView(self, sources=None, root=None, rootname=''):
         if (root is None):
-            self.view.model().clear()
-            self.root = root = self.view.model().invisibleRootItem()
+            self.view.model.clear()
+            self.root = root = self.view.model.invisibleRootItem()
             data = CompileCommands()
             sources = data.sources
             rootname = data.path
@@ -278,7 +279,7 @@ class SourceTab(TreeViewTab):
             item.setData(rootname, Qt.UserRole)
             root.appendRow(item)
             parent = root.child(root.rowCount() - 1)
-            if (isinstance(sources, dict)):
+            if (parent and isinstance(sources, dict)):
                 self.populateView(sources[itemname], parent, os.path.join(rootname, itemname))
 
     def checked(self):
@@ -325,16 +326,19 @@ class ResultsTab(QtWidgets.QWidget):
     class ResultsView(TreeViewTab):
         def populateView(self, data=None, root=None, rootname=''):
             if (root is None):
-                self.view.model().clear()
-                self.root = root = self.view.model().invisibleRootItem()
+                self.view.model.clear()
+                self.root = root = self.view.model.invisibleRootItem()
 
                 sorttype = self.parent().sortcombo.currentIndex()
                 data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
 
+            # model = self.view.model
             for item in data:
+                # self.view.model.insertRow(0)
+                # self.view.model.setData(self.view.model.index(0, 0), StandardItem(item))
                 root.appendRow(StandardItem(item))
                 parent = root.child(root.rowCount() - 1)
-                if (isinstance(data, dict)):
+                if (parent and isinstance(data, dict)):
                     self.populateView(data[item], parent, os.path.join(rootname, item))
 
         def sortedByFilename(self):
