@@ -38,21 +38,16 @@ class Results(object):
         def __init__(self):
             self.data = []
     instance = None
-    def __new__(cls): # __new__ always a classmethod
+    def __new__(cls):
         if not Results.instance:
             Results.instance = Results.__OnlyOne()
         return Results.instance
-    def __getattr__(self, name):
-        return getattr(self.instance, name)
-    # def __setattr__(self, name):
-    #     return setattr(self.instance, name)
 
 
 class ClangChecks(object):
     class __OnlyOne:
         def __init__(self):
             self.checks = {}
-            print ('getting clang checks')
             cmd = 'clang-tidy --list-checks --checks="*"'
             checks = os.popen(cmd).read().strip()
             for check in checks.split('\n'):
@@ -62,12 +57,10 @@ class ClangChecks(object):
                 category = check.split('-')[0]
                 self.checks.setdefault(category, []).append('-'.join(check.split('-')[1:]))
     instance = None
-    def __new__(cls): # __new__ always a classmethod
+    def __new__(cls):
         if not ClangChecks.instance:
             ClangChecks.instance = ClangChecks.__OnlyOne()
         return ClangChecks.instance
-    def __getattr__(self, name):
-        return getattr(self.instance, name)
 
 
 class CompileCommands():
@@ -146,8 +139,10 @@ class TreeView(QtWidgets.QTreeView):
     def __init__(self, parent=None):
         super(TreeView, self).__init__(parent)
 
-        self.model = QtGui.QStandardItemModel(parent)
-        self.model.setHeaderData(0, Qt.Horizontal, "From")
+        self.model = QtGui.QStandardItemModel(0, 2, parent)
+        # self.model.setHeaderData(0, Qt.Horizontal, "Check")
+        # model = QStandardItemModel(0, 3, parent)
+        print ('tv, ', self.model)
         self.setModel(self.model)
 
     def expandChildren(self, index):
@@ -181,7 +176,6 @@ class TreeView(QtWidgets.QTreeView):
                     return
         super(TreeView, self).mousePressEvent(event)
 
-
 class TreeViewTab(QtWidgets.QWidget):
     def __init__(self, parent):
         super(TreeViewTab, self).__init__(parent)
@@ -190,7 +184,7 @@ class TreeViewTab(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.view = TreeView(self)
-        # self.view.setHeaderHidden(True)
+        self.view.setHeaderHidden(True)
         # self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
 
         self.view.collapseAll()
@@ -309,23 +303,9 @@ class ResultsTab(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # sorting method combo box
-        sortlayout = QtWidgets.QHBoxLayout()
-        sortlayout.setContentsMargins(10, 5, 0, 0)
-        sortlayout.setAlignment(Qt.AlignLeft)
-        label = QtWidgets.QLabel('Sort by: ')
-        self.sortcombo = QtWidgets.QComboBox(self)
-        self.sortcombo.currentIndexChanged.connect(self.refresh)
-        self.sortcombo.addItem(' Filename ')
-        self.sortcombo.addItem(' Checkname')
-        self.sortcombo.setCurrentIndex(1)
-        sortlayout.addWidget(label)
-        sortlayout.addWidget(self.sortcombo)
-
         # results view
         self.view = self.ResultsView(self)
 
-        layout.addLayout(sortlayout)
         layout.addWidget(self.view)
 
     def refresh(self):
@@ -340,58 +320,99 @@ class ResultsTab(QtWidgets.QWidget):
         self.view.collapseAll()
 
     class ResultsView(TreeViewTab):
+        def __init__(self, parent):
+            TreeViewTab.__init__(self, parent)
+            self.view.setAlternatingRowColors(True)
+            self.view.setHeaderHidden(False)
+            self.view.setRootIsDecorated(False)
+            self.view.setSortingEnabled(True)
+            self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+
+            self.view.model.setHeaderData(0, Qt.Horizontal, "Check")
+            self.view.model.setHeaderData(1, Qt.Horizontal, "Filename")
+
         def populateView(self, data=None, root=None, rootname=''):
             if (root is None):
-                self.view.model.clear()
-                self.root = root = self.view.model.invisibleRootItem()
+                model = self.view.model
+                model.clear()
+                root = self.view.model.invisibleRootItem()
 
-                sorttype = self.parent().sortcombo.currentIndex()
-                data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
+                ###########
 
+                data = Results().data
+
+                # get common base path of filenames
+                paths = [x[0] for x in data]
+                basepath = os.path.dirname(os.path.commonprefix(paths))
+                trim = len(basepath) + 1
+
+                root.appendRow([StandardItem(""), StandardItem("")])
+
+                # data = {}
+                for filename, check in data:
+                    # category = check.split('-')[0]
+                    # shortcheck = '-'.join(check.split('-')[1:])
+
+                    # trim common base path off filename
+                    filename = filename[trim:]
+                    # data.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
+
+                    # root.appendRow([StandardItem(check), StandardItem(filename)])
+
+                    model.insertRow(0)
+                    model.setData(model.index(0, 0), check)
+                    model.setData(model.index(0, 1), filename)
+
+                ###########
+
+                # sorttype = 1
+                # data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
+
+            self.view.resizeColumnToContents(0)
             # model = self.view.model
-            for item in data:
+            # for item in data:
                 # self.view.model.insertRow(0)
                 # self.view.model.setData(self.view.model.index(0, 0), StandardItem(item))
-                root.appendRow(StandardItem(item))
-                parent = root.child(root.rowCount() - 1)
-                if (parent and isinstance(data, dict)):
-                    self.populateView(data[item], parent, os.path.join(rootname, item))
+                # root.appendRow(StandardItem(item))
+                # parent = root.child(root.rowCount() - 1)
+                # if (parent and isinstance(data, dict)):
+                #     self.populateView(data[item], parent, os.path.join(rootname, item))
 
-        def sortedByFilename(self):
-            data = Results().data
+        # def sortedByFilename(self):
+        #     data = Results().data
 
-            # get common base path
-            paths = [x[0] for x in data]
-            basepath = os.path.dirname(os.path.commonprefix(paths))
+        #     # get common base path
+        #     paths = [x[0] for x in data]
+        #     basepath = os.path.dirname(os.path.commonprefix(paths))
 
-            # trim common base path off each path
-            trim = len(basepath)
-            paths = [x[trim:] for x in paths]
-            paths = [x[1:] for x in paths if x[0] == os.sep]
+        #     # trim common base path off each path
+        #     trim = len(basepath)
+        #     paths = [x[trim:] for x in paths]
+        #     paths = [x[1:] for x in paths if x[0] == os.sep]
 
-            results = {}
-            for path in paths:
-                dictizeString(path, results)
-            return results
+        #     results = {}
+        #     for path in paths:
+        #         dictizeString(path, results)
+        #     return results
 
-        def sortedByCheckname(self):
-            data = Results().data
+        # def sortedByCheckname(self):
+        #     data = Results().data
 
-            # get common base path
-            paths = [x[0] for x in data]
-            basepath = os.path.dirname(os.path.commonprefix(paths))
+        #     # get common base path
+        #     paths = [x[0] for x in data]
+        #     basepath = os.path.dirname(os.path.commonprefix(paths))
 
-            results = {}
-            for filename, check in data:
-                category = check.split('-')[0]
-                shortcheck = '-'.join(check.split('-')[1:])
+        #     results = {}
+        #     for filename, check in data:
+        #         category = check.split('-')[0]
+        #         shortcheck = '-'.join(check.split('-')[1:])
 
-                # trim common base path off filename
-                trim = len(basepath) + 1
-                filename = filename[trim:]
-                results.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
+        #         # trim common base path off filename
+        #         trim = len(basepath) + 1
+        #         filename = filename[trim:]
+        #         results.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
 
-            return results
+        #     return results
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -475,8 +496,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(mainwidget)
 
         # TODO: remove
-        # tabwidget.setCurrentWidget(self.resultsTab)
-        tabwidget.setCurrentWidget(self.checksTab)
+        tabwidget.setCurrentWidget(self.resultsTab)
+        # tabwidget.setCurrentWidget(self.checksTab)
         self.runClangTidy()
 
     def checkAll(self):
@@ -523,17 +544,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # if all the checks are enabled use 'category-*'
             if (len(enabledchecks) == len(allchecks[category])):
-               optimizedchecks.append('%s*' % (category))
+                optimizedchecks.append('%s*' % (category))
 
             # if a minority of checks are enabled, use '-category*, enabled'
             elif (len(enabledchecks) < len(allchecks[category]) / 2):
-               optimizedchecks.append('-%s*' % (category))
-               optimizedchecks.extend(['%s-%s' % (category, x) for x in enabledchecks])
+                optimizedchecks.append('-%s*' % (category))
+                optimizedchecks.extend(['%s-%s' % (category, x) for x in enabledchecks])
 
             # if a majority of checks are enabled, use 'category*, -enabled'
             else:
-               optimizedchecks.append('%s*' % (category))
-               optimizedchecks.extend(['-%s-%s' % (category, x) for x in enabledchecks])      
+                optimizedchecks.append('%s*' % (category))
+                optimizedchecks.extend(['-%s-%s' % (category, x) for x in enabledchecks])      
 
         return optimizedchecks
 
