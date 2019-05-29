@@ -7,7 +7,7 @@ import json
 import yaml
 
 from PyQt5 import QtGui, QtWidgets
-from PyQt5.QtCore import Qt, QItemSelectionModel
+from PyQt5.QtCore import Qt, QItemSelectionModel, QItemSelection
 
 def dictizeString(string, dictionary):
     while string.startswith(os.path.sep):
@@ -338,6 +338,7 @@ class ResultsTab(QtWidgets.QWidget):
             self.setHeaderHidden(False)
             self.setRootIsDecorated(False)
             self.setSortingEnabled(True)
+            self.sortByColumn(0, Qt.DescendingOrder)
             self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
             self.model.setHeaderData(0, Qt.Horizontal, "Check")
@@ -359,7 +360,7 @@ class ResultsTab(QtWidgets.QWidget):
                 basepath = os.path.dirname(os.path.commonprefix(paths))
                 trim = len(basepath) + 1
 
-                root.appendRow([StandardItem(""), StandardItem("")])
+                # root.appendRow([StandardItem(""), StandardItem("")])
 
                 # data = {}
                 for filename, check in data:
@@ -368,13 +369,14 @@ class ResultsTab(QtWidgets.QWidget):
 
                     # trim common base path off filename
                     filename = filename[trim:]
+
                     # data.setdefault(category, {}).setdefault(shortcheck, []).append(filename)
 
-                    # root.appendRow([StandardItem(check), StandardItem(filename)])
+                    root.appendRow([StandardItem(check), StandardItem(filename)])
 
-                    self.model.insertRow(0)
-                    self.model.setData(self.model.index(0, 0), check)
-                    self.model.setData(self.model.index(0, 1), filename)
+                    # self.model.insertRow(0)
+                    # self.model.setData(self.model.index(0, 0), check)
+                    # self.model.setData(self.model.index(0, 1), filename)
 
                 ###########
 
@@ -382,11 +384,18 @@ class ResultsTab(QtWidgets.QWidget):
                 # data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
 
             self.resizeColumnToContents(0)
+            self.resizeColumnToContents(1)
+            self.setColumnWidth(0, self.columnWidth(0) + 20)
+            self.setColumnWidth(1, self.columnWidth(1) + 20)
 
-            index = self.model.index(3, 0)
-            self.selectionModel().setCurrentIndex(index, QItemSelectionModel.Select)
+            # index = self.model.index(0, 0, self.rootIndex())
+            # self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent)
+            # index = self.model.index(0, 1, self.rootIndex())
+            # self.selectionModel().setCurrentIndex(index, QItemSelectionModel.SelectCurrent)
 
-            self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            self.selectionModel().select(QItemSelection(self.model.index(0, 0), self.model.index(0, 1)), QItemSelectionModel.SelectCurrent)
+
+            # self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
             # model = self.view.model
             # for item in data:
@@ -612,7 +621,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if (os.path.exists(fixesfile) and os.path.getsize(fixesfile) > 0):
                 fixesdata = open(fixesfile).read().strip()
 
-                fixes = yaml.load(fixesdata, Loader=yaml.FullLoader)
+                fixes = yaml.load(fixesdata, Loader=yaml.Loader)
                 # fixes = {'Diagnostics': {}}
                 for fix in fixes['Diagnostics']:
                     if ('Replacements' not in fix['DiagnosticMessage']):
