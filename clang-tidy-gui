@@ -7,7 +7,7 @@ import json
 import yaml
 
 from PyQt5 import QtGui, QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QItemSelectionModel
 
 def dictizeString(string, dictionary):
     while string.startswith(os.path.sep):
@@ -135,15 +135,17 @@ class StandardItem(QtGui.QStandardItem):
             return Qt.Checked
 
 
-class TreeView(QtWidgets.QTreeView):
+class TreeViewTab(QtWidgets.QTreeView):
     def __init__(self, parent=None):
-        super(TreeView, self).__init__(parent)
+        super(TreeViewTab, self).__init__(parent)
 
-        self.model = QtGui.QStandardItemModel(0, 2, parent)
-        # self.model.setHeaderData(0, Qt.Horizontal, "Check")
-        # model = QStandardItemModel(0, 3, parent)
-        print ('tv, ', self.model)
-        self.setModel(self.model)
+        # self.model = QtGui.QStandardItemModel(0, 2, parent)
+        # self.setModel(self.model)
+
+        self.setHeaderHidden(True)
+        self.root = None
+        self.parent = parent
+        self.populateView()
 
     def expandChildren(self, index):
         if (not index.isValid()):
@@ -165,35 +167,35 @@ class TreeView(QtWidgets.QTreeView):
         if (self.isExpanded(index)):
             self.collapse(index)
 
-    def mousePressEvent(self, event):
-        index = self.indexAt(event.pos())
-        if (index.isValid()):
-            vrect = self.visualRect(index)
-            indentation = vrect.x() - self.visualRect(self.rootIndex()).x()
-            if (event.pos().x() < indentation):
-                if (QtWidgets.QApplication.keyboardModifiers() == Qt.ShiftModifier):
-                    [self.expandChildren, self.collapseChildren][self.isExpanded(index)](index)
-                    return
-        super(TreeView, self).mousePressEvent(event)
+    # def mousePressEvent(self, event):
+    #     index = self.indexAt(event.pos())
+    #     if (index.isValid()):
+    #         vrect = self.visualRect(index)
+    #         indentation = vrect.x() - self.visualRect(self.rootIndex()).x()
+    #         if (event.pos().x() < indentation):
+    #             if (QtWidgets.QApplication.keyboardModifiers() == Qt.ShiftModifier):
+    #                 [self.expandChildren, self.collapseChildren][self.isExpanded(index)](index)
+    #                 return
+    #     super(TreeViewTab, self).mousePressEvent(event)
 
-class TreeViewTab(QtWidgets.QWidget):
-    def __init__(self, parent):
-        super(TreeViewTab, self).__init__(parent)
+# class TreeViewTab(QtWidgets.QWidget):
+#     def __init__(self, parent):
+#         super(TreeViewTab, self).__init__(parent)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+#         layout = QtWidgets.QVBoxLayout(self)
+#         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.view = TreeView(self)
-        self.view.setHeaderHidden(True)
-        # self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
+#         self.view = TreeView(self)
+#         self.view.setHeaderHidden(True)
+#         # self.view.model().setHeaderData(0, Qt.Horizontal, 'foo')
 
-        self.view.collapseAll()
+#         self.view.collapseAll()
 
-        self.root = None
+#         self.root = None
 
-        self.populateView()
+#         self.populateView()
 
-        layout.addWidget(self.view)
+#         layout.addWidget(self.view)
 
     def selectAll(self):
         for row in range(self.root.rowCount()):
@@ -205,11 +207,11 @@ class TreeViewTab(QtWidgets.QWidget):
             child = self.root.child(row, 0)
             child.setCheckState(Qt.Unchecked)
 
-    def expandAll(self):
-        self.view.expandAll()
+    # def expandAll(self):
+    #     self.view.expandAll()
 
-    def collapseAll(self):
-        self.view.collapseAll()
+    # def collapseAll(self):
+    #     self.view.collapseAll()
 
     def _checked(self, sep):
 
@@ -226,7 +228,7 @@ class TreeViewTab(QtWidgets.QWidget):
                 yield from recurse(root)
 
         checked = []
-        model = self.view.model
+        model = self.model
         for item in iterItems(self.root):
             if (item.checkState() and not item.hasChildren()):
                 checked.append(sep.join([model.data(item.index(), Qt.UserRole), model.data(item.index())]))
@@ -235,10 +237,15 @@ class TreeViewTab(QtWidgets.QWidget):
 
 
 class ChecksTab(TreeViewTab):
+    def __init__(self, parent=None):
+        super(ChecksTab, self).__init__(parent)
+
     def populateView(self, data=None, root=None, rootname=''):
         if (root is None):
-            self.view.model.clear()
-            self.root = root = self.view.model.invisibleRootItem()
+            self.model = QtGui.QStandardItemModel(0, 1, self.parent)
+            self.setModel(self.model)
+            self.model.clear()
+            self.root = root = self.model.invisibleRootItem()
             data = ClangChecks().checks
 
         for itemname in data:
@@ -264,10 +271,15 @@ class ChecksTab(TreeViewTab):
 
 
 class SourceTab(TreeViewTab):
+    def __init__(self, parent=None):
+        super(SourceTab, self).__init__(parent)
+
     def populateView(self, sources=None, root=None, rootname=''):
         if (root is None):
-            self.view.model.clear()
-            self.root = root = self.view.model.invisibleRootItem()
+            self.model = QtGui.QStandardItemModel(0, 1, self.parent)
+            self.setModel(self.model)
+            self.model.clear()
+            self.root = root = self.model.invisibleRootItem()
             data = CompileCommands()
             sources = data.sources
             rootname = data.path
@@ -322,20 +334,21 @@ class ResultsTab(QtWidgets.QWidget):
     class ResultsView(TreeViewTab):
         def __init__(self, parent):
             TreeViewTab.__init__(self, parent)
-            self.view.setAlternatingRowColors(True)
-            self.view.setHeaderHidden(False)
-            self.view.setRootIsDecorated(False)
-            self.view.setSortingEnabled(True)
-            self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+            self.setAlternatingRowColors(True)
+            self.setHeaderHidden(False)
+            self.setRootIsDecorated(False)
+            self.setSortingEnabled(True)
+            self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
-            self.view.model.setHeaderData(0, Qt.Horizontal, "Check")
-            self.view.model.setHeaderData(1, Qt.Horizontal, "Filename")
+            self.model.setHeaderData(0, Qt.Horizontal, "Check")
+            self.model.setHeaderData(1, Qt.Horizontal, "Filename")
 
         def populateView(self, data=None, root=None, rootname=''):
             if (root is None):
-                model = self.view.model
-                model.clear()
-                root = self.view.model.invisibleRootItem()
+                self.model = QtGui.QStandardItemModel(0, 1, self.parent)
+                self.setModel(self.model)
+                self.model.clear()
+                root = self.model.invisibleRootItem()
 
                 ###########
 
@@ -359,16 +372,22 @@ class ResultsTab(QtWidgets.QWidget):
 
                     # root.appendRow([StandardItem(check), StandardItem(filename)])
 
-                    model.insertRow(0)
-                    model.setData(model.index(0, 0), check)
-                    model.setData(model.index(0, 1), filename)
+                    self.model.insertRow(0)
+                    self.model.setData(self.model.index(0, 0), check)
+                    self.model.setData(self.model.index(0, 1), filename)
 
                 ###########
 
                 # sorttype = 1
                 # data = [self.sortedByFilename, self.sortedByCheckname][sorttype]()
 
-            self.view.resizeColumnToContents(0)
+            self.resizeColumnToContents(0)
+
+            index = self.model.index(3, 0)
+            self.selectionModel().setCurrentIndex(index, QItemSelectionModel.Select)
+
+            self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+
             # model = self.view.model
             # for item in data:
                 # self.view.model.insertRow(0)
